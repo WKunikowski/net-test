@@ -70,6 +70,7 @@ fn handle_connection(mut stream: TcpStream, routes: &mut HashMap<String, EndPoin
 
     match get_protocol(&http_request[0]) {
         "GET" => println!("Request: {:#?}", http_request[0]),
+        "POST" => println!("Request: {:#?}", http_request[0]),
         _ => return println!("Unknown request"),
     }
     let end_point = get_end_point(&http_request[0]);
@@ -157,13 +158,43 @@ fn register_end_point(routes: &mut HashMap<String, EndPoint>, end_point: &str, f
 }
 
 fn pre_render(response: &EndPoint) -> String  {
-
     let mut response_to = response.page.clone();
-    let to_change: Vec<_> = response.page.match_indices("{fmtl:").collect();
+
+    // Ifs
+    let to_change: Vec<_> = response.page.match_indices("{pap:").collect();
+    for (_, _) in to_change {
+        let start_tag_index = response_to.find("{pap:").unwrap();
+
+
+        let mut closing_tag_index = start_tag_index + 1;
+        let mut j = 0;
+        for i in response_to[start_tag_index..].chars() {
+            if i == '{' {
+                j += 1;
+            }
+
+            if i == '}' {
+                j -= 1;
+
+                if j == 0 {
+                    break;
+                }
+            }
+            closing_tag_index += 1;
+        }
+
+        println!("{}", response_to[start_tag_index + 5..closing_tag_index - 1].to_string());
+        
+
+
+    }
+
+    // Render Variables
+    let to_change: Vec<_> = response.page.match_indices("{pap=").collect();
 
 
     for (_, _) in to_change {
-        let start_tag_index = response_to.find("{fmtl:").unwrap();
+        let start_tag_index = response_to.find("{pap=").unwrap();
         
         let closing_tag_index = response_to[start_tag_index..].to_string().find("}").expect(format!("no closing tag found").as_str());
 
