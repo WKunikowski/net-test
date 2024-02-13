@@ -10,6 +10,7 @@ use serde::Serialize;
 
 pub struct EndPoint {
     renderer: fn(req: &Vec<String>, stream: TcpStream),
+    protocol: Protocols,
 }
 
 pub struct Template<T> where T: Serialize {
@@ -17,8 +18,16 @@ pub struct Template<T> where T: Serialize {
     pub value: T,
 } 
 
+#[derive(Debug, Eq, PartialEq, Hash)]
+pub enum Protocols {
+    GET,
+    POST,
+    PUT,
+    DELETE,
+}
 
-pub fn start_server(addr: &str, routes: HashMap<String, EndPoint>, static_folders: Vec<String>) {
+
+pub fn start_server(addr: &str, routes: HashMap<Protocols, &HashMap<String, EndPoint>>, static_folders: Vec<String>) {
 
     let listener = TcpListener::bind(addr).unwrap();
 
@@ -29,7 +38,7 @@ pub fn start_server(addr: &str, routes: HashMap<String, EndPoint>, static_folder
     }
 }
 
-fn handle_connection(mut stream: TcpStream, routes: &HashMap<String, EndPoint>, static_folders: &Vec<String>) {
+fn handle_connection(mut stream: TcpStream, routes: &HashMap<Protocols, &HashMap<String, EndPoint>>, static_folders: &Vec<String>) {
     let buf_reader = BufReader::new(&mut stream);
     let http_request: Vec<_> = buf_reader
         .lines()
@@ -42,17 +51,22 @@ fn handle_connection(mut stream: TcpStream, routes: &HashMap<String, EndPoint>, 
         return println!("No request found");
     }
 
+    let end_point = get_end_point(&http_request[0]);
+    println!("Request: {:#?}", http_request[0]);
 
     match get_protocol(&http_request[0]) {
-        "GET" => println!("Request: {:#?}", http_request[0]),
-        "POST" => println!("Request: {:#?}", http_request[0]),
+        "GET" => handle_get_request(&routes[&Protocols::GET], stream, static_folders, &http_request, end_point),
+        "POST" => handle_post_request(&routes[&Protocols::POST], stream, &http_request, end_point),
         _ => return println!("Unknown request"),
     }
-    let end_point = get_end_point(&http_request[0]);
-    let page = get_page(&routes, end_point, &static_folders);
-    match page {
-        Some(page) => {
-            (page.renderer)(&http_request, stream);
+}
+
+fn handle_get_request(get_routes: &HashMap<String, EndPoint>, stream: TcpStream, static_folders: &Vec<String>, http_request: &Vec<String>, end_point: &str) {
+    let route = get_route(&get_routes, end_point);
+    
+    match route {
+        Some(route) => {
+            (route.renderer)(&http_request, stream);
         },
         None => {
             let static_file = find_static_file(end_point, static_folders);
@@ -62,13 +76,21 @@ fn handle_connection(mut stream: TcpStream, routes: &HashMap<String, EndPoint>, 
                     send_html(stream, response);
                 },
                 None => {
-                    let page404 = routes.get("*");
+                    let page404 = get_routes.get("*");
                     if let Some(page404) = page404 {
                         (page404.renderer)(&http_request, stream);
                     }
                 }
             }
         }
+    }
+}
+
+fn handle_post_request(post_routes: &HashMap<String, EndPoint>, stream: TcpStream, http_request: &Vec<String>, end_point: &str) {
+    let route = get_route(&post_routes, end_point);
+
+    if let Some(route) = route {
+        (route.renderer)(&http_request, stream);
     }
 }
 
@@ -116,7 +138,7 @@ fn get_protocol(request: &str) -> &str {
     s[0]
 }
 
-fn get_page<'a>(routes: &'a HashMap<String, EndPoint>, end_point: &'a str, static_folders: &Vec<String>) -> Option<&'a EndPoint> {
+fn get_route<'a>(routes: &'a HashMap<String, EndPoint>, end_point: &'a str) -> Option<&'a EndPoint> {
     routes.get(end_point)
 }
 
@@ -136,9 +158,10 @@ fn find_static_file(path: &str, static_folders: &Vec<String>) -> Option<String> 
     None
 }
 
-pub fn register_end_point(routes: &mut HashMap<String, EndPoint>, end_point: &str, f: fn(req: &Vec<String>, stream: TcpStream)) {
+pub fn register_end_point(routes: &mut HashMap<String, EndPoint>, end_point: &str, protocol: Protocols, f: fn(req: &Vec<String>, stream: TcpStream)) {
     let page_info = EndPoint {
-        renderer: f
+        renderer: f,
+        protocol: protocol
     };
 
     routes.insert(end_point.to_owned(), page_info);
