@@ -148,6 +148,8 @@ pub fn register_static_folder(folder_path: &str, static_folders: &mut Vec<String
     static_folders.push(folder_path.to_string().to_lowercase());
 }
 
+pub fn render_ext<T>()
+
 pub fn render<T>(page: String, objects: Option<Vec<Template<T>>>) -> String where T: Serialize {
 
     // Render Variables
@@ -172,7 +174,7 @@ pub fn render<T>(page: String, objects: Option<Vec<Template<T>>>) -> String wher
 
 }
 
-fn render_with_objects<T>(instruction: &str, objects: &Option<Vec<Template<T>>>) -> String where T: Serialize {
+fn render_with_objects<T>(instruction: &str, objects: &Option<Vec<Template<T>>>) -> String where T: Serializeable {
     let mut t = Expr::new(instruction);
 
     if let Some(objects) = objects {
@@ -190,4 +192,9 @@ fn render_with_objects<T>(instruction: &str, objects: &Option<Vec<Template<T>>>)
         },
         Err(e) => e.to_string(),
     }
+}
+
+trait Serializeable {
+    type Serialize;
+    type None;
 }
