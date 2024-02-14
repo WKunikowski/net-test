@@ -1,6 +1,3 @@
-#![allow(unused_variables)]
-#![warn(dead_code)]
-
 use std::{
     collections::HashMap, fs, io::{prelude::*, BufReader}, net::{TcpListener, TcpStream}
 };
@@ -9,8 +6,14 @@ use eval::Expr;
 use serde::Serialize;
 
 pub struct EndPoint {
-    renderer: fn(req: &Vec<String>, stream: TcpStream),
-    protocol: Protocols,
+    renderer: fn(req: &Vec<String>, stream: TcpStream)
+}
+
+pub struct Routes {
+    pub get_routes: HashMap<String, EndPoint>,
+    pub post_routes: HashMap<String, EndPoint>,
+    pub put_routes: HashMap<String, EndPoint>,
+    pub delete_routes: HashMap<String, EndPoint>,
 }
 
 pub struct Template<T> where T: Serialize {
@@ -27,7 +30,7 @@ pub enum Protocols {
 }
 
 
-pub fn start_server(addr: &str, routes: HashMap<Protocols, &HashMap<String, EndPoint>>, static_folders: Vec<String>) {
+pub fn start_server(addr: &str, routes: Routes, static_folders: Vec<String>) {
 
     let listener = TcpListener::bind(addr).unwrap();
 
@@ -38,7 +41,7 @@ pub fn start_server(addr: &str, routes: HashMap<Protocols, &HashMap<String, EndP
     }
 }
 
-fn handle_connection(mut stream: TcpStream, routes: &HashMap<Protocols, &HashMap<String, EndPoint>>, static_folders: &Vec<String>) {
+fn handle_connection(mut stream: TcpStream, routes: &Routes, static_folders: &Vec<String>) {
     let buf_reader = BufReader::new(&mut stream);
     let http_request: Vec<_> = buf_reader
         .lines()
@@ -55,8 +58,8 @@ fn handle_connection(mut stream: TcpStream, routes: &HashMap<Protocols, &HashMap
     println!("Request: {:#?}", http_request[0]);
 
     match get_protocol(&http_request[0]) {
-        "GET" => handle_get_request(&routes[&Protocols::GET], stream, static_folders, &http_request, end_point),
-        "POST" => handle_post_request(&routes[&Protocols::POST], stream, &http_request, end_point),
+        "GET" => handle_get_request(&routes.get_routes, stream, &static_folders, &http_request, end_point),
+        "POST" => handle_post_request(&routes.put_routes, stream, &http_request, end_point),
         _ => return println!("Unknown request"),
     }
 }
@@ -158,13 +161,17 @@ fn find_static_file(path: &str, static_folders: &Vec<String>) -> Option<String> 
     None
 }
 
-pub fn register_end_point(routes: &mut HashMap<String, EndPoint>, end_point: &str, protocol: Protocols, f: fn(req: &Vec<String>, stream: TcpStream)) {
+pub fn register_end_point(routes: &mut Routes, end_point: &str, protocol: Protocols, f: fn(req: &Vec<String>, stream: TcpStream)) {
     let page_info = EndPoint {
-        renderer: f,
-        protocol: protocol
+        renderer: f
     };
 
-    routes.insert(end_point.to_owned(), page_info);
+    match protocol {
+        Protocols::GET => routes.get_routes.insert(end_point.to_owned(), page_info),
+        Protocols::POST => routes.post_routes.insert(end_point.to_owned(), page_info),
+        Protocols::PUT => routes.put_routes.insert(end_point.to_owned(), page_info),
+        Protocols::DELETE => routes.delete_routes.insert(end_point.to_owned(), page_info),
+    };
 }
 
 pub fn register_static_folder(folder_path: &str, static_folders: &mut Vec<String>) {
