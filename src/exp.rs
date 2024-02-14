@@ -5,15 +5,13 @@ use std::{
 use eval::Expr;
 use serde::Serialize;
 
-pub struct EndPoint {
-    renderer: fn(req: &Vec<String>, stream: TcpStream)
-}
+type Renderer = fn(req: &Vec<String>, stream: TcpStream);
 
 pub struct Routes {
-    pub get_routes: HashMap<String, EndPoint>,
-    pub post_routes: HashMap<String, EndPoint>,
-    pub put_routes: HashMap<String, EndPoint>,
-    pub delete_routes: HashMap<String, EndPoint>,
+    pub get_routes: HashMap<String, Renderer>,
+    pub post_routes: HashMap<String, Renderer>,
+    pub put_routes: HashMap<String, Renderer>,
+    pub delete_routes: HashMap<String, Renderer>,
 }
 
 pub struct Template<T> where T: Serialize {
@@ -21,7 +19,6 @@ pub struct Template<T> where T: Serialize {
     pub value: T,
 } 
 
-#[derive(Debug, Eq, PartialEq, Hash)]
 pub enum Protocols {
     GET,
     POST,
@@ -64,12 +61,12 @@ fn handle_connection(mut stream: TcpStream, routes: &Routes, static_folders: &Ve
     }
 }
 
-fn handle_get_request(get_routes: &HashMap<String, EndPoint>, stream: TcpStream, static_folders: &Vec<String>, http_request: &Vec<String>, end_point: &str) {
-    let route = get_route(&get_routes, end_point);
+fn handle_get_request(get_routes: &HashMap<String, Renderer>, stream: TcpStream, static_folders: &Vec<String>, http_request: &Vec<String>, end_point: &str) {
+    let renderer = get_route(&get_routes, end_point);
     
-    match route {
-        Some(route) => {
-            (route.renderer)(&http_request, stream);
+    match renderer {
+        Some(renderer) => {
+            (renderer)(&http_request, stream);
         },
         None => {
             let static_file = find_static_file(end_point, static_folders);
@@ -80,8 +77,8 @@ fn handle_get_request(get_routes: &HashMap<String, EndPoint>, stream: TcpStream,
                 },
                 None => {
                     let page404 = get_routes.get("*");
-                    if let Some(page404) = page404 {
-                        (page404.renderer)(&http_request, stream);
+                    if let Some(renderer) = page404 {
+                        (renderer)(&http_request, stream);
                     }
                 }
             }
@@ -89,11 +86,11 @@ fn handle_get_request(get_routes: &HashMap<String, EndPoint>, stream: TcpStream,
     }
 }
 
-fn handle_post_request(post_routes: &HashMap<String, EndPoint>, stream: TcpStream, http_request: &Vec<String>, end_point: &str) {
-    let route = get_route(&post_routes, end_point);
+fn handle_post_request(post_routes: &HashMap<String, Renderer>, stream: TcpStream, http_request: &Vec<String>, end_point: &str) {
+    let renderer = get_route(&post_routes, end_point);
 
-    if let Some(route) = route {
-        (route.renderer)(&http_request, stream);
+    if let Some(renderer) = renderer {
+        (renderer)(&http_request, stream);
     }
 }
 
@@ -141,7 +138,7 @@ fn get_protocol(request: &str) -> &str {
     s[0]
 }
 
-fn get_route<'a>(routes: &'a HashMap<String, EndPoint>, end_point: &'a str) -> Option<&'a EndPoint> {
+fn get_route<'a>(routes: &'a HashMap<String, Renderer>, end_point: &'a str) -> Option<&'a Renderer> {
     routes.get(end_point)
 }
 
@@ -161,16 +158,15 @@ fn find_static_file(path: &str, static_folders: &Vec<String>) -> Option<String> 
     None
 }
 
-pub fn register_end_point(routes: &mut Routes, end_point: &str, protocol: Protocols, f: fn(req: &Vec<String>, stream: TcpStream)) {
-    let page_info = EndPoint {
-        renderer: f
-    };
+pub fn register_end_point(routes: &mut Routes, protocol: Protocols, end_point: &str, f: fn(req: &Vec<String>, stream: TcpStream)) {
+
+    let renderer = f;
 
     match protocol {
-        Protocols::GET => routes.get_routes.insert(end_point.to_owned(), page_info),
-        Protocols::POST => routes.post_routes.insert(end_point.to_owned(), page_info),
-        Protocols::PUT => routes.put_routes.insert(end_point.to_owned(), page_info),
-        Protocols::DELETE => routes.delete_routes.insert(end_point.to_owned(), page_info),
+        Protocols::GET => routes.get_routes.insert(end_point.to_owned(), renderer),
+        Protocols::POST => routes.post_routes.insert(end_point.to_owned(), renderer),
+        Protocols::PUT => routes.put_routes.insert(end_point.to_owned(), renderer),
+        Protocols::DELETE => routes.delete_routes.insert(end_point.to_owned(), renderer),
     };
 }
 
