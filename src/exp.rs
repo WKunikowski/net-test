@@ -1,3 +1,5 @@
+#[warn(dead_code)]
+
 use std::{
     collections::HashMap, fs, io::{prelude::*, BufReader}, net::{TcpListener, TcpStream}
 };
@@ -5,7 +7,7 @@ use std::{
 use eval::Expr;
 use serde::Serialize;
 
-type Renderer = fn(req: &Vec<String>, stream: TcpStream);
+type Renderer = fn(req: UrlData, stream: TcpStream);
 
 pub struct Routes {
     pub get_routes: HashMap<String, Renderer>,
@@ -17,7 +19,14 @@ pub struct Routes {
 pub struct Template<T> where T: Serialize {
     pub name: &'static str,
     pub value: T,
-} 
+}
+
+#[derive(Debug)]
+pub struct UrlData {
+    pub end_point: String,
+    pub params: Option<HashMap<String, Option<String>>>,
+    pub http_request: Vec<String>,
+}
 
 pub enum Protocols {
     GET,
@@ -46,30 +55,26 @@ fn handle_connection(mut stream: TcpStream, routes: &Routes, static_folders: &Ve
         .take_while(|line| !line.is_empty())
         .collect();
 
-
     if http_request.len() == 0 {
         return println!("No request found");
     }
 
-    let end_point = get_end_point(&http_request[0]);
-    println!("Request: {:#?}", http_request[0]);
-
     match get_protocol(&http_request[0]) {
-        "GET" => handle_get_request(&routes.get_routes, stream, &static_folders, &http_request, end_point),
-        "POST" => handle_post_request(&routes.put_routes, stream, &http_request, end_point),
+        "GET" => handle_get_request(&routes.get_routes, stream, &static_folders, get_url_data(&http_request)),
+        "POST" => handle_post_request(&routes.post_routes, stream, get_url_data(&http_request)),
         _ => return println!("Unknown request"),
     }
 }
 
-fn handle_get_request(get_routes: &HashMap<String, Renderer>, stream: TcpStream, static_folders: &Vec<String>, http_request: &Vec<String>, end_point: &str) {
-    let renderer = get_route(&get_routes, end_point);
+fn handle_get_request(get_routes: &HashMap<String, Renderer>, stream: TcpStream, static_folders: &Vec<String>, url_data: UrlData) {
+    let renderer = get_route(&get_routes, &url_data.end_point);
     
     match renderer {
         Some(renderer) => {
-            (renderer)(&http_request, stream);
+            (renderer)(url_data, stream);
         },
         None => {
-            let static_file = find_static_file(end_point, static_folders);
+            let static_file = find_static_file(&url_data.end_point, static_folders);
 
             match static_file {
                 Some(response) => {
@@ -78,7 +83,7 @@ fn handle_get_request(get_routes: &HashMap<String, Renderer>, stream: TcpStream,
                 None => {
                     let page404 = get_routes.get("*");
                     if let Some(renderer) = page404 {
-                        (renderer)(&http_request, stream);
+                        (renderer)(url_data, stream);
                     }
                 }
             }
@@ -86,11 +91,11 @@ fn handle_get_request(get_routes: &HashMap<String, Renderer>, stream: TcpStream,
     }
 }
 
-fn handle_post_request(post_routes: &HashMap<String, Renderer>, stream: TcpStream, http_request: &Vec<String>, end_point: &str) {
-    let renderer = get_route(&post_routes, end_point);
+fn handle_post_request(post_routes: &HashMap<String, Renderer>, stream: TcpStream, url_data: UrlData) {
+    let renderer = get_route(&post_routes, &url_data.end_point);
 
     if let Some(renderer) = renderer {
-        (renderer)(&http_request, stream);
+        (renderer)(url_data, stream);
     }
 }
 
@@ -128,9 +133,41 @@ pub fn get_html_page(path: &str) -> Option<String> {
     }
 }
 
-fn get_end_point(request: &str) -> &str {
-    let s: Vec<&str> = request.split_whitespace().collect();
-    s[1]
+fn get_url_data(request: &Vec<String>) -> UrlData {
+
+    UrlData {
+        end_point: get_end_point(&request[0]),
+        params: get_url_params(&request[0]),
+        http_request: request.to_owned()
+    }
+}
+
+fn get_end_point(request: &String) -> String {
+    let mut s: Vec<_> = request.split_whitespace().collect();
+    s = s[1].split("?").collect();
+    s[0].to_string()
+}
+
+fn get_url_params(request: &String) -> Option<HashMap<String, Option<String>>> {
+    let mut s: Vec<_> = request.split_whitespace().collect();
+    s = s[1].split("?").collect();
+
+    if s.len() == 1 {
+        return None;
+    }
+
+    let params: Vec<&str> = s[1].split("&").collect();
+    let mut url_params = HashMap::new();
+
+    for param in params.iter() {
+        let p: Vec<&str> = param.split("=").collect();
+        if p.len() == 1 {
+            url_params.insert(p[0].to_string(), None);
+            break;
+        }
+        url_params.insert(p[0].to_string(), Some(p[1].to_string()));
+    }
+    Some(url_params)
 }
 
 fn get_protocol(request: &str) -> &str {
@@ -158,7 +195,7 @@ fn find_static_file(path: &str, static_folders: &Vec<String>) -> Option<String> 
     None
 }
 
-pub fn register_end_point(routes: &mut Routes, protocol: Protocols, end_point: &str, f: fn(req: &Vec<String>, stream: TcpStream)) {
+pub fn register_end_point(routes: &mut Routes, protocol: Protocols, end_point: &str, f: fn(req: UrlData, stream: TcpStream)) {
 
     let renderer = f;
 
