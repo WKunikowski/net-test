@@ -41,7 +41,7 @@ fn main() {
     });
     
     exp::register_end_point(&mut routes, Protocols::POST, "/test", |req: UrlData, stream: TcpStream| {
-        println!("req: {:?}", req);
+        println!("req: {:?}", req.body);
 
         let current_timestamp: i64 = SystemTime::now()
         .duration_since(UNIX_EPOCH)

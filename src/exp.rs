@@ -1,7 +1,5 @@
-#[warn(dead_code)]
-
 use std::{
-    collections::HashMap, fs, io::{prelude::*, BufReader}, net::{TcpListener, TcpStream}
+    borrow::BorrowMut, collections::HashMap, fs, io::{prelude::*, BufReader}, net::{TcpListener, TcpStream}
 };
 
 use eval::Expr;
@@ -23,9 +21,11 @@ pub struct Template<T> where T: Serialize {
 
 #[derive(Debug)]
 pub struct UrlData {
+    pub protocol: String,
     pub end_point: String,
     pub params: Option<HashMap<String, Option<String>>>,
-    pub http_request: Vec<String>,
+    pub http_request: HashMap<String, String>,
+    pub body: Option<HashMap<String, String>>
 }
 
 pub enum Protocols {
@@ -47,23 +47,58 @@ pub fn start_server(addr: &str, routes: Routes, static_folders: Vec<String>) {
     }
 }
 
-fn handle_connection(mut stream: TcpStream, routes: &Routes, static_folders: &Vec<String>) {
-    let buf_reader = BufReader::new(&mut stream);
-    let http_request: Vec<_> = buf_reader
-        .lines()
-        .map(|result| result.unwrap())
-        .take_while(|line| !line.is_empty())
-        .collect();
+fn handle_connection(stream: TcpStream, routes: &Routes, static_folders: &Vec<String>) {
 
-    if http_request.len() == 0 {
-        return println!("No request found");
+    let mut buf_reader: BufReader<&TcpStream> = BufReader::new(&stream);
+
+    let mut http_request: HashMap<String, String> = HashMap::new();
+
+    let end_point = buf_reader.borrow_mut().lines().next();
+    if end_point.is_none() {
+        return;
     }
 
-    match get_protocol(&http_request[0]) {
-        "GET" => handle_get_request(&routes.get_routes, stream, &static_folders, get_url_data(&http_request)),
-        "POST" => handle_post_request(&routes.post_routes, stream, get_url_data(&http_request)),
+    let end_point = end_point.unwrap();
+    if end_point.is_err() {
+        return;
+    }
+
+    let end_point = end_point.unwrap();
+    http_request.insert("Protocol".to_string(), end_point);
+
+    while let Some(line_of_request) = buf_reader.borrow_mut().lines().next() {
+
+        if line_of_request.is_err() {
+            break;
+        }
+
+        let line = line_of_request.unwrap();
+
+        if line == "" {
+            break;
+        }
+
+        let text: Vec<&str> = line.split_whitespace().collect();
+        if text.len() < 2 {
+            continue;
+        }
+
+        let key = text[0].to_string()[..text[0].len() - 1].to_string();
+        let value = text[1..].join(" ").to_string();
+
+        http_request.insert(key, value);
+    }
+
+
+
+    let header_data = get_header_data(http_request, &mut buf_reader);
+
+    match header_data.protocol.as_str() {
+        "GET" => handle_get_request(&routes.get_routes, stream, &static_folders, header_data),
+        "POST" => handle_post_request(&routes.post_routes, stream, header_data),
         _ => return println!("Unknown request"),
     }
+
 }
 
 fn handle_get_request(get_routes: &HashMap<String, Renderer>, stream: TcpStream, static_folders: &Vec<String>, url_data: UrlData) {
@@ -133,13 +168,49 @@ pub fn get_html_page(path: &str) -> Option<String> {
     }
 }
 
-fn get_url_data(request: &Vec<String>) -> UrlData {
+fn get_header_data(header: HashMap<String, String>, buf_reader: &mut BufReader<&TcpStream>) -> UrlData {
 
     UrlData {
-        end_point: get_end_point(&request[0]),
-        params: get_url_params(&request[0]),
-        http_request: request.to_owned()
+        protocol: get_protocol(&header.get("Protocol").unwrap()),
+        end_point: get_end_point(&header.get("Protocol").unwrap()),
+        params: get_url_params(&header.get("Protocol").unwrap()),
+        body: get_body_data(&header, buf_reader),
+        http_request: header,
     }
+}
+
+fn get_body_data(http_request: &HashMap<String, String>, buf_reader: &mut BufReader<&TcpStream>) -> Option<HashMap<String, String>> {
+    let mut body_map: HashMap<String, String> = HashMap::new();
+
+    if let Some(content_length) = http_request.get("Content-Length")  {
+        
+        let content_length = content_length.parse::<usize>().unwrap();
+
+        let mut body_data_buffer = vec![0; content_length - 1];
+        buf_reader.read(&mut body_data_buffer).unwrap();
+
+        let body = std::str::from_utf8(&body_data_buffer).unwrap();
+        let body: Vec<_> = body.split("\r\n").collect();
+
+        
+        for mut x in 0..body.len() {
+            if body[x].starts_with("Content-Disposition") {
+                let key: Vec<_> = body[x].split_whitespace().collect();
+                let key = key[2].to_string();
+                let key = key.replace("name=", "");
+                let key = key.replace("\"", "");
+
+                let value= body[x + 2].to_string();
+                
+                body_map.insert(key, value);
+
+                x += 2;
+            }
+        }
+
+        return Some(body_map);
+    }
+    return None
 }
 
 fn get_end_point(request: &String) -> String {
@@ -170,9 +241,9 @@ fn get_url_params(request: &String) -> Option<HashMap<String, Option<String>>> {
     Some(url_params)
 }
 
-fn get_protocol(request: &str) -> &str {
-    let s: Vec<&str> = request.split_whitespace().collect();
-    s[0]
+fn get_protocol(request: &String) -> String {
+    let s: Vec<_> = request.split_whitespace().collect();
+    s[0].to_string()
 }
 
 fn get_route<'a>(routes: &'a HashMap<String, Renderer>, end_point: &'a str) -> Option<&'a Renderer> {
