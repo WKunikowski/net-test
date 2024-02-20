@@ -1,10 +1,11 @@
-use std::{collections::HashMap, net::TcpStream, time::{SystemTime, UNIX_EPOCH}};
+use std::{collections::HashMap, net::TcpStream, thread::sleep, time::{SystemTime, UNIX_EPOCH}};
 
 use exp::{get_html_page, render, send_html, send_json, Protocols, Routes, UrlData};
 
 mod exp;
 
-fn main() {
+#[tokio::main]
+async fn main() {
 
     let mut static_folders: Vec<String> = Vec::new();
     let mut routes: Routes = Routes {
@@ -35,6 +36,7 @@ fn main() {
         let temp2 = vec![temp];
 
         let page = render(page, Some(temp2));
+
         
         // let page: String = render::<String>(page, None);
         send_html(stream, page);
@@ -48,8 +50,11 @@ fn main() {
         .unwrap()
         .as_secs() as i64;
 
+        sleep(std::time::Duration::from_secs(10));
+
+
         send_json(stream, format!("{{\"status\": \"success\", \"message\": \"Current timestamp {}\" }}", current_timestamp));
     });
 
-    exp::start_server("127.0.0.1:7878", routes, static_folders);
+    exp::start_server("127.0.0.1:7878", routes, static_folders).await;
 }

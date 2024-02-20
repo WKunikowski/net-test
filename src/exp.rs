@@ -1,5 +1,5 @@
 use std::{
-    borrow::BorrowMut, collections::HashMap, fs, io::{prelude::*, BufReader}, net::{TcpListener, TcpStream}
+    borrow::{Borrow, BorrowMut}, collections::HashMap, fs, io::{prelude::*, BufReader}, net::{TcpListener, TcpStream}
 };
 
 use eval::Expr;
@@ -7,6 +7,7 @@ use serde::Serialize;
 
 type Renderer = fn(req: UrlData, stream: TcpStream);
 
+#[derive(Clone)]
 pub struct Routes {
     pub get_routes: HashMap<String, Renderer>,
     pub post_routes: HashMap<String, Renderer>,
@@ -36,14 +37,20 @@ pub enum Protocols {
 }
 
 
-pub fn start_server(addr: &str, routes: Routes, static_folders: Vec<String>) {
+pub async fn start_server(addr: &str, routes: Routes, static_folders: Vec<String>) {
 
     let listener = TcpListener::bind(addr).unwrap();
 
     for stream in listener.incoming() {
         let stream = stream.unwrap();
 
-        handle_connection(stream, &routes, &static_folders);
+        let routes = routes.clone();
+        let static_folders = static_folders.clone();
+
+
+        tokio::spawn(async move {
+            handle_connection(stream, &routes, &static_folders);
+        });
     }
 }
 
@@ -88,8 +95,6 @@ fn handle_connection(stream: TcpStream, routes: &Routes, static_folders: &Vec<St
 
         http_request.insert(key, value);
     }
-
-
 
     let header_data = get_header_data(http_request, &mut buf_reader);
 
